@@ -29,8 +29,8 @@ return new class extends Migration
             $table->timestamp('two_factor_locked_until')->nullable();
             $table->integer('login_attempts')->default(0);
             $table->timestamp('login_locked_until')->nullable();
-            $table->foreignId('created_by')->constrained('users')->onUpdate('cascade')->onDelete('restrict');
-            $table->foreignId('updated_by')->constrained('users')->onUpdate('cascade')->onDelete('restrict');
+            $table->foreignId('created_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
+            $table->foreignId('updated_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
             $table->foreignId('deleted_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
             $table->timestamps();
             $table->softDeletes();

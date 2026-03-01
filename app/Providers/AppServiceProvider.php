@@ -38,7 +38,13 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         // Dynamically override session expiration strategy
-        config(['session.expire_on_close' => filter_var(Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN)]);
+        try {
+            if (! $this->app->runningInConsole() || \Illuminate\Support\Facades\Schema::hasTable('settings')) {
+                config(['session.expire_on_close' => filter_var(\App\Models\Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN)]);
+            }
+        } catch (\Throwable $e) {
+            // Table doesn't exist yet or connection failed, skip override
+        }
         
         // Register the auditable observer for User model
         User::observe(AuditableObserver::class);
