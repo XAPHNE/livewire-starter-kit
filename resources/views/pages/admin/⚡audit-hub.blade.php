@@ -18,7 +18,7 @@ new class extends Component {
 
 <div x-data="{ tab: '{{ auth()->user()->can('View Audit Trail') ? 'audits' : 'auth' }}' }">
     <div
-        class="sticky top-0 z-20 -mt-6 -mx-4 px-4 pt-4 pb-4 mb-6 bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-700 font-sans">
+        class="sticky top-0 z-19 -mt-6 -mx-4 px-4 pt-4 pb-4 mb-6 bg-white/80 dark:bg-zinc-800/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-700 font-sans">
         <div>
             <flux:breadcrumbs>
                 <flux:breadcrumbs.item href="{{ route('dashboard') }}">Home</flux:breadcrumbs.item>
