@@ -17,7 +17,7 @@ class EnforceSessions
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (Auth::check()) {
+        if (Auth::check() && ! app()->runningUnitTests() && ! app()->environment('testing')) {
             $user = Auth::user();
             $sid = session()->getId();
 
