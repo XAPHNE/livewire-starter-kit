@@ -54,53 +54,18 @@ class AppServiceProvider extends ServiceProvider
             $this->app['router']->pushMiddlewareToGroup('web', EnforceSessions::class);
         }
 
-        // Login: create or update session record and enforce concurrent limits
+        // Login: proactive session cleanup
         Event::listen(Login::class, function (Login $event) {
             /** @var \App\Models\User $user */
             $user = $event->user;
-            $sid = session()->getId();
 
-            // 0. Catch-all: Purge expired sessions for this user FIRST to prevent stale records blocking logins
+            // Purge expired sessions for this user to prevent stale records blocking logins
             $timeout = (int) Setting::get('session_timeout_minutes', 60);
             $cutoff = now()->subMinutes($timeout);
+            
             UserSession::where('user_id', $user->getKey())
                 ->where('last_activity', '<', $cutoff)
                 ->delete();
-
-            UserSession::updateOrCreate(
-                ['session_id' => $sid],
-                [
-                    'user_id' => $user->getKey(),
-                    'ip_address' => request()->ip(),
-                    'user_agent' => request()->header('User-Agent'),
-                    'last_activity' => now(),
-                ]
-            );
-
-            // Enforce concurrent sessions by evicting oldest sessions if necessary
-            $allow = $this->computeAllowedSessions($user);
-            $sessions = UserSession::where('user_id', $user->getKey())
-                ->orderBy('last_activity', 'desc')
-                ->get();
-                
-            if ($sessions->count() > $allow) {
-                // keep newest $allow sessions
-                $toKeep = $sessions->take($allow)->pluck('session_id')->toArray();
-                
-                // Purge from custom tracking table
-                UserSession::where('user_id', $user->getKey())
-                    ->whereNotIn('session_id', $toKeep)
-                    ->delete();
-
-                // Purge from Laravel CORE sessions table if database driver is in use
-                // This is critical for actually logging the user out of other devices
-                if (config('session.driver') === 'database') {
-                    DB::table(config('session.table'))
-                        ->where('user_id', $user->getKey())
-                        ->whereNotIn('id', $toKeep)
-                        ->delete();
-                }
-            }
         });
 
         // Logout: remove session record
@@ -115,28 +80,6 @@ class AppServiceProvider extends ServiceProvider
                 Mail::to($user->email)->send(new SendTwoFactorCodeMail($user->two_factor_code));
             }
         });
-    }
-
-    protected function computeAllowedSessions($user): int
-    {
-        $enabled = filter_var(Setting::get('enable_concurrent_sessions', 'true'), FILTER_VALIDATE_BOOLEAN);
-        if (! $enabled) {
-            return 1;
-        }
-
-        $tierBased = filter_var(Setting::get('enable_tier_based_concurrency', 'false'), FILTER_VALIDATE_BOOLEAN);
-        if ($tierBased) {
-            // Find the highest session limit from all tiers assigned to the user
-            $max = $user->tiers()->whereNotNull('concurrent_sessions')->max('concurrent_sessions');
-            
-            // If the user has assigned tiers with limits, use the maximum one
-            if ($max) return (int) $max;
-            
-            // Otherwise, falling back to global 'default_concurrent_sessions' below
-        }
-
-        // Standard global default (also used as fallback for Tier-based system)
-        return (int) Setting::get('default_concurrent_sessions', 1);
     }
 
     protected function configureDefaults(): void
