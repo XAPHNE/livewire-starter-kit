@@ -40,7 +40,9 @@
             </div>
 
             <!-- Remember Me -->
-            <flux:checkbox name="remember" :label="__('Remember me')" :checked="old('remember')" />
+            @if (! filter_var(\App\Models\Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN))
+                <flux:checkbox name="remember" :label="__('Remember me')" :checked="old('remember')" />
+            @endif
 
             <div class="flex items-center justify-end">
                 <flux:button variant="primary" type="submit" class="w-full" data-test="login-button">

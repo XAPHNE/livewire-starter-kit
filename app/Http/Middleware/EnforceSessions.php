@@ -17,70 +17,84 @@ class EnforceSessions
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (Auth::check() && ! app()->runningUnitTests() && ! app()->environment('testing')) {
-            $user = Auth::user();
-            $sid = session()->getId();
+        if (Auth::check()) {
+            // 0. Enforce "Option B": If "Logout on Browser Close" is enabled,
+            // we must not allow "Remember Me" sessions to persist.
+            if (Auth::viaRemember() && filter_var(Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN)) {
+                Auth::logout();
+                session()->invalidate();
+                session()->regenerateToken();
+                return redirect()->route('login')->with('status', 'Persistent login is disabled when "Logout on Browser Close" is active.');
+            }
 
-            // 1. Load current session record
-            $curr = UserSession::where('session_id', $sid)->where('user_id', $user->id)->first();
+            if (!app()->runningUnitTests() && !app()->environment('testing')) {
+                $user = Auth::user();
+                $sid = session()->getId();
 
-            // 2. Self-Healing: If record is missing, try to register it (handles regeneration during login)
-            if (! $curr) {
-                // Calculate allowed sessions
-                $allow = $this->computeAllowedSessions($user);
-                
-                // Get all active sessions for this user
-                $sessions = UserSession::where('user_id', $user->id)
-                    ->orderBy('last_activity', 'desc')
-                    ->get();
+                // 1. Load current session record
+                $curr = UserSession::where('session_id', $sid)->where('user_id', $user->id)->first();
 
-                // If at/over limit, we must evict some to make room for this new session
-                if ($sessions->count() >= $allow) {
-                    // We need to keep only $allow - 1 sessions to make room for the current one
-                    $toKeep = $sessions->take($allow - 1)->pluck('session_id')->toArray();
-                    
-                    // Purge from custom tracking table
-                    UserSession::where('user_id', $user->id)
-                        ->whereNotIn('session_id', $toKeep)
-                        ->delete();
+                // 2. Self-Healing: If record is missing, try to register it (handles regeneration during login)
+                if (!$curr) {
+                    // Calculate allowed sessions
+                    $allow = $this->computeAllowedSessions($user);
 
-                    // Purge from Laravel CORE sessions table if database driver is in use
-                    if (config('session.driver') === 'database') {
-                        \Illuminate\Support\Facades\DB::table(config('session.table'))
-                            ->where('user_id', $user->id)
-                            ->whereNotIn('id', $toKeep)
+                    // Get all active sessions for this user
+                    $sessions = UserSession::where('user_id', $user->id)
+                        ->orderBy('last_activity', 'desc')
+                        ->get();
+
+                    // If at/over limit, we must evict some to make room for this new session
+                    if ($sessions->count() >= $allow) {
+                        // We need to keep only $allow - 1 sessions to make room for the current one
+                        $toKeep = $sessions->take($allow - 1)->pluck('session_id')->toArray();
+
+                        // IMPORTANT: We must also keep the current session ID in the exclusion list!
+                        $toKeep[] = $sid;
+
+                        // Purge from custom tracking table
+                        UserSession::where('user_id', $user->id)
+                            ->whereNotIn('session_id', $toKeep)
                             ->delete();
+
+                        // Purge from Laravel CORE sessions table if database driver is in use
+                        if (config('session.driver') === 'database') {
+                            \Illuminate\Support\Facades\DB::table(config('session.table'))
+                                ->where('user_id', $user->id)
+                                ->whereNotIn('id', $toKeep)
+                                ->delete();
+                        }
+                    }
+
+                    // Register the current (new/regenerated) session
+                    $curr = UserSession::create([
+                        'session_id' => $sid,
+                        'user_id' => $user->id,
+                        'ip_address' => $request->ip(),
+                        'user_agent' => $request->header('User-Agent'),
+                        'last_activity' => now(),
+                    ]);
+                }
+
+                // 3. Inactivity Enforcement
+                $timeout = (int)Setting::get('session_timeout_minutes', 60);
+                if ($curr->last_activity) {
+                    $cutoff = now()->subMinutes($timeout);
+                    if ($curr->last_activity->lessThan($cutoff)) {
+                        Auth::logout();
+                        session()->invalidate();
+                        session()->regenerateToken();
+                        return redirect()->route('login')->with('status', 'Your session has been terminated due to inactivity.');
                     }
                 }
 
-                // Register the current (new/regenerated) session
-                $curr = UserSession::create([
-                    'session_id' => $sid,
-                    'user_id' => $user->id,
+                // 4. Update last activity
+                $curr->update([
+                    'last_activity' => now(),
                     'ip_address' => $request->ip(),
                     'user_agent' => $request->header('User-Agent'),
-                    'last_activity' => now(),
                 ]);
             }
-
-            // 3. Inactivity Enforcement
-            $timeout = (int) Setting::get('session_timeout_minutes', 60);
-            if ($curr->last_activity) {
-                $cutoff = now()->subMinutes($timeout);
-                if ($curr->last_activity->lessThan($cutoff)) {
-                    Auth::logout();
-                    session()->invalidate();
-                    session()->regenerateToken();
-                    return redirect()->route('login')->with('status', 'Your session has been terminated due to inactivity.');
-                }
-            }
-
-            // 4. Update last activity
-            $curr->update([
-                'last_activity' => now(),
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->header('User-Agent'),
-            ]);
         }
 
         return $next($request);
@@ -89,7 +103,7 @@ class EnforceSessions
     protected function computeAllowedSessions($user): int
     {
         $enabled = filter_var(Setting::get('enable_concurrent_sessions', 'true'), FILTER_VALIDATE_BOOLEAN);
-        if (! $enabled) {
+        if (!$enabled) {
             return 1;
         }
 
@@ -97,12 +111,13 @@ class EnforceSessions
         if ($tierBased) {
             // Find the highest session limit from all tiers assigned to the user
             $max = $user->tiers()->whereNotNull('concurrent_sessions')->max('concurrent_sessions');
-            
+
             // If the user has assigned tiers with limits, use the maximum one
-            if ($max) return (int) $max;
+            if ($max)
+                return (int)$max;
         }
 
         // Standard global default
-        return (int) Setting::get('default_concurrent_sessions', 1);
+        return (int)Setting::get('default_concurrent_sessions', 1);
     }
 }
