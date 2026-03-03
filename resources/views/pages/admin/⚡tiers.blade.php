@@ -3,9 +3,11 @@
 use Livewire\Component;
 use App\Models\Tier;
 use Livewire\Attributes\On;
+use Illuminate\Validation\Rule;
 
 new class extends Component {
     public ?int $tierId = null;
+    public array $tierIds = [];
     public string $name = '';
     public string $description = '';
     public ?int $concurrent_sessions = 1;
@@ -52,11 +54,40 @@ new class extends Component {
         $this->dispatch('modal-show', name: 'delete-tier');
     }
 
+    #[On('bulk-delete-tiers')]
+    public function bulkDelete(array $ids): void
+    {
+        \Illuminate\Support\Facades\Gate::authorize('Delete Tiers');
+        $this->tierIds = $ids;
+        $this->dispatch('modal-show', name: 'bulk-delete-tiers');
+    }
+
+    public function bulkDeleteConfirmed(): void
+    {
+        \Illuminate\Support\Facades\Gate::authorize('Delete Tiers');
+        try {
+            $tiers = Tier::whereIn('id', $this->tierIds)->get();
+            foreach ($tiers as $tier) {
+                $tier->update(['deleted_by' => auth()->id()]);
+                $tier->delete();
+            }
+
+            $this->dispatch('pg:eventRefresh-tierTable');
+            $this->dispatch('modal-close', name: 'bulk-delete-tiers');
+            flash()->option('position', 'bottom-right')->success('Tiers deleted successfully.');
+            $this->tierIds = [];
+            $this->dispatch('clear-checkboxes', name: 'tierTable');
+        } catch (\Exception $e) {
+            flash()->option('position', 'bottom-right')->error('Something went wrong.');
+        }
+    }
+
     public function deleteConfirmed(): void
     {
         \Illuminate\Support\Facades\Gate::authorize('Delete Tiers');
         try {
             $tier = Tier::findOrFail($this->tierId);
+            $tier->update(['deleted_by' => auth()->id()]);
             $tier->delete();
 
             $this->dispatch('pg:eventRefresh-tierTable');
@@ -70,7 +101,7 @@ new class extends Component {
     public function save(): void
     {
         $this->validate([
-            'name' => ['required', 'string', 'max:100'],
+            'name' => ['required', 'string', 'min:2', 'max:100', new \App\Rules\AllowedCharactersRule(), Rule::unique('tiers')->ignore($this->tierId)],
             'description' => ['nullable', 'string', 'max:255'],
             'concurrent_sessions' => ['nullable', 'integer', 'min:1', 'max:1000'],
         ]);
@@ -83,6 +114,7 @@ new class extends Component {
                     'name' => $this->name,
                     'description' => $this->description,
                     'concurrent_sessions' => $this->concurrent_sessions,
+                    'updated_by' => auth()->id(),
                 ]);
                 $message = 'Tier updated successfully.';
             } else {
@@ -91,6 +123,8 @@ new class extends Component {
                     'name' => $this->name,
                     'description' => $this->description,
                     'concurrent_sessions' => $this->concurrent_sessions,
+                    'created_by' => auth()->id(),
+                    'updated_by' => auth()->id(),
                 ]);
                 $message = 'Tier created successfully.';
             }
@@ -162,6 +196,23 @@ new class extends Component {
                 <flux:button type="button" variant="ghost" x-on:click="$flux.modal('delete-tier').close()">
                     Cancel</flux:button>
                 <flux:button type="submit" variant="primary" color="red">Delete</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <flux:modal name="bulk-delete-tiers" class="md:w-96">
+        <form wire:submit="bulkDeleteConfirmed" class="space-y-6">
+            <div>
+                <flux:heading size="lg">Bulk Delete Tiers</flux:heading>
+                <flux:text class="mt-2">Are you sure you want to delete <span x-text="$wire.tierIds.length"></span>
+                    tiers? This action cannot be undone.
+                </flux:text>
+            </div>
+
+            <div class="flex justify-between">
+                <flux:button type="button" variant="ghost" x-on:click="$flux.modal('bulk-delete-tiers').close()">
+                    Cancel</flux:button>
+                <flux:button type="submit" variant="primary" color="red">Delete Selected</flux:button>
             </div>
         </form>
     </flux:modal>

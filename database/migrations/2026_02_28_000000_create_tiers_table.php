@@ -14,7 +14,11 @@ return new class extends Migration
             $table->text('description')->nullable();
             // default concurrent sessions for this tier (nullable = inherit global)
             $table->unsignedInteger('concurrent_sessions')->nullable();
+            $table->foreignId('created_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
+            $table->foreignId('updated_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
+            $table->foreignId('deleted_by')->nullable()->constrained('users')->onUpdate('cascade')->onDelete('restrict');
             $table->timestamps();
+            $table->softDeletes();
         });
     }
 
