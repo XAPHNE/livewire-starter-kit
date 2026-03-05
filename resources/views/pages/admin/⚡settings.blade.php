@@ -79,6 +79,7 @@ new class extends Component {
             'forgot_password_max_attempts' => 'required|integer|min:1|max:20',
             'forgot_password_lockdown_hours' => 'required|integer|min:1|max:72',
             'login_throttle_strategy' => 'required|in:account,hybrid',
+            'enable_public_registration' => 'required|boolean',
             'default_public_role' => 'nullable|string',
             'default_public_tier' => 'nullable|string',
             'password_history_limit' => 'required|integer|min:0|max:20',
