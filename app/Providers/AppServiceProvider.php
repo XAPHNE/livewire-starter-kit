@@ -5,6 +5,8 @@ namespace App\Providers;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Support\Facades\Event;
@@ -35,12 +37,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        URL::forceScheme('https');
         $this->configureDefaults();
 
         // Dynamically override session expiration strategy
         try {
-            if (! $this->app->runningInConsole() || \Illuminate\Support\Facades\Schema::hasTable('settings')) {
-                config(['session.expire_on_close' => filter_var(\App\Models\Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN)]);
+            if (! $this->app->runningInConsole() || Schema::hasTable('settings')) {
+                config(['session.expire_on_close' => filter_var(Setting::get('session_expire_on_close', 'false'), FILTER_VALIDATE_BOOLEAN)]);
             }
         } catch (\Throwable $e) {
             // Table doesn't exist yet or connection failed, skip override
